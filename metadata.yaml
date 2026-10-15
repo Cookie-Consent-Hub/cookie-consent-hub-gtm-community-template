@@ -17,5 +17,5 @@ documentation: "https://cookieconsenthub.com/documentation/gtm-setup"
 # Reverse chronological order, newest first — the gallery reads this list to
 # decide which version to serve.
 versions:
-  - sha: 19bed66f990686ac6ff9f3e854b9ef99123efe8f
+  - sha: b24e778155ae3b1f102fa45b0208808574351e98
     changeNotes: Initial Version
