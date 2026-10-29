@@ -33,108 +33,75 @@ ___TEMPLATE_PARAMETERS___
 
 ___SANDBOXED_JS_FOR_WEB_TEMPLATE___
 
-const dataLayerPush = require('createQueue')('dataLayer');
+const copyFromWindow = require('copyFromWindow');
+const createQueue = require('createQueue');
+const getCookieValues = require('getCookieValues');
 const gtagSet = require('gtagSet');
 const log = require('logToConsole');
 const setDefaultConsentState = require('setDefaultConsentState');
-const copyFromWindow = require('copyFromWindow');
-const getCookieValues = require('getCookieValues');
 
-// store state trigger for default consent state
-let defaultTrigerred = false;
+const dataLayerPush = createQueue('dataLayer');
 
-// Consent Mapping
-const consentMapping = {
-  'fa-consent-ad_personalization': 'ad_personalization',
-  'fa-consent-ad_storage': 'ad_storage',
-  'fa-consent-ad_user_data': 'ad_user_data',
-  'fa-consent-analytics_storage': 'analytics_storage',
-  'fa-consent-functionality_storage': 'functionality_storage',
-  'fa-consent-personalization_storage': 'personalization_storage',
-  'fa-consent-security_storage': 'security_storage',
-};
+// The Consent Mode storage types the banner records, one cookie each, holding
+// 'true' or 'false'.
+const CONSENT_TYPES = [
+  'ad_personalization',
+  'ad_storage',
+  'ad_user_data',
+  'analytics_storage',
+  'functionality_storage',
+  'personalization_storage',
+  'security_storage',
+];
 
+// Current cookie prefix first. Banner versions before 1.0.32 used the second,
+// and 1.0.32 moves a returning visitor's cookies to the first on their next
+// page view, so the second is only read while older versions are still live.
+const PREFIXES = ['cch-consent-', 'fa-consent-'];
 
-// Function to return the GTM Consents default state from cookies
-function getConsentStatus(consents) {
-  const consentStatus = {wait_for_update: 2000};
-
-  // Loop over the consents to check each cookie
-  for (const cookieName in consents) {
-    if (consents.hasOwnProperty(cookieName)) {
-      const consentType = consents[cookieName];
-      const cookieValue = getCookieValues(cookieName);
-
-      log('[GTM] Cookie state: ' + cookieName + ' = ' + cookieValue[0]);
-
-      // Set default to 'granted' for 'security_storage' if the cookie does not exist
-      if (consentType === 'security_storage' && cookieValue.length === 0) {
-        consentStatus[consentType] = 'granted';
-      } else {
-        consentStatus[consentType] = cookieValue.length > 0 && cookieValue[0] === 'true' ? 'granted' : 'denied';
-      }
-    }
+// The value the banner stored for a storage type, or undefined before the
+// visitor has made a choice.
+function storedValue(type) {
+  for (let i = 0; i < PREFIXES.length; i++) {
+    const values = getCookieValues(PREFIXES[i] + type);
+    if (values.length > 0) return values[0];
   }
-
-  return consentStatus;
+  return undefined;
 }
 
-// Get the GTM Consents using the fsCookies
-const consentStatus = getConsentStatus(consentMapping);
+const consentState = {wait_for_update: 2000};
+CONSENT_TYPES.forEach((type) => {
+  const value = storedValue(type);
+  // Security storage is strictly necessary, so it is granted until a stored
+  // choice says otherwise.
+  if (type === 'security_storage' && value === undefined) {
+    consentState[type] = 'granted';
+  } else {
+    consentState[type] = value === 'true' ? 'granted' : 'denied';
+  }
+});
 
-log('[GTM] Consents: consent status', consentStatus);
+log('[Cookie Consent Hub] Consent Mode defaults:', consentState);
+setDefaultConsentState(consentState);
 
-log('[GTM] Consents: Default state sent?', defaultTrigerred);
-
-if (!defaultTrigerred) {
-  // Set the default consent state
-  setDefaultConsentState(consentStatus);
-  defaultTrigerred = true;
-
-  log('[GTM] Consents: Default state sent?', defaultTrigerred);
-  log('[GTM] Consents: Default state updated with', consentStatus);
-}
-
-// Set advanced settings
 gtagSet({
   url_passthrough: data.url_passthrough || false,
   ads_data_redaction: data.ads_data_redaction || false,
 });
 
-// Push to dataLayer if needed
-log('[GTM] Consents: consentStatus', consentStatus);
+// 'update' when the visitor has already chosen on an earlier page view.
+const mode = storedValue('security_storage') === undefined ? 'default' : 'update';
+consentState.event = 'gtm_consent_' + mode;
+dataLayerPush(consentState);
 
-// Function to determine which consent mapping to use
-function cookiesExists() {
-  const settingsCookie = getCookieValues('fa-consent-security_storage');
-  log('[GTM] fs-consent-security_storage exists', settingsCookie.length > 0);
-
-  return settingsCookie.length > 0;
-}
-
-const mode = cookiesExists() ? 'update' : 'default';
-
-consentStatus.event = 'gtm_consent_' + mode;
-
-// trigger consent mode defaults
-dataLayerPush(consentStatus);
-
-const dataLayerFromWindow = copyFromWindow('dataLayer');
-log('Current dataLayer values:', dataLayerFromWindow);
-
-// check if essentials activated event has fired in dataLayer
-const hasActivatedEssential = dataLayerFromWindow.some(item => item && typeof item === 'object' && item.event === 'essential-activated');
-
-if(!hasActivatedEssential){
-  // trigger essentials activated
+// Essential storage is always allowed, so its event fires on every page
+// unless the banner has already pushed it.
+const dataLayer = copyFromWindow('dataLayer') || [];
+const essentialAlreadyPushed = dataLayer.some((item) => item && typeof item === 'object' && item.event === 'essential-activated');
+if (!essentialAlreadyPushed) {
   dataLayerPush({event: 'essential-activated'});
 }
 
-
-log('[GTM] consent object fired:', consentStatus);
-
-
-// Call data.gtmOnSuccess when the tag is finished.
 data.gtmOnSuccess();
 
 
@@ -274,35 +241,31 @@ ___WEB_PERMISSIONS___
             "listItem": [
               {
                 "type": 1,
-                "string": "fa-cc-ad_personalization"
+                "string": "cch-consent-ad_personalization"
               },
               {
                 "type": 1,
-                "string": "fa-cc-ad_storage"
+                "string": "cch-consent-ad_storage"
               },
               {
                 "type": 1,
-                "string": "fa-cc-ad_user_data"
+                "string": "cch-consent-ad_user_data"
               },
               {
                 "type": 1,
-                "string": "fa-cc-analytics_storage"
+                "string": "cch-consent-analytics_storage"
               },
               {
                 "type": 1,
-                "string": "fa-cc-functionality_storage"
+                "string": "cch-consent-functionality_storage"
               },
               {
                 "type": 1,
-                "string": "fa-cc-personalization_storage"
+                "string": "cch-consent-personalization_storage"
               },
               {
                 "type": 1,
-                "string": "fa-cc-security_storage"
-              },
-              {
-                "type": 1,
-                "string": "fa-cc"
+                "string": "cch-consent-security_storage"
               },
               {
                 "type": 1,
@@ -331,10 +294,6 @@ ___WEB_PERMISSIONS___
               {
                 "type": 1,
                 "string": "fa-consent-security_storage"
-              },
-              {
-                "type": 1,
-                "string": "fa-consent"
               }
             ]
           }
@@ -595,6 +554,6 @@ scenarios: []
 
 ___NOTES___
 
-Created on 12/23/2024, 10:22:56 AM
+Cookie Consent Hub template for Google Consent Mode v2.
 
 
