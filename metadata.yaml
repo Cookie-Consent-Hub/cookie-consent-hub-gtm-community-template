@@ -17,5 +17,7 @@ documentation: "https://cookieconsenthub.com/documentation/gtm-setup"
 # Reverse chronological order, newest first — the gallery reads this list to
 # decide which version to serve.
 versions:
+  - sha: ecb9b6852f8c82c52d1a54c8f4d4805eda3a7b70
+    changeNotes: Reads the cch-consent cookies set by banner 1.0.32 and later, with the older names as a fallback.
   - sha: b24e778155ae3b1f102fa45b0208808574351e98
     changeNotes: Initial Version
